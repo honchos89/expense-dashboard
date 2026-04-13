@@ -1,51 +1,48 @@
-import json
-from datetime import date, timedelta
-from pathlib import Path
+from datetime import date
 
+import requests
 import streamlit as st
 import pandas as pd
 
-# ── Data layer (mirrors expense_tracker.py) ──────────────────────────────────
-
-DATA_FILE = Path("expenses.json")
-BUDGETS_FILE = Path("budgets.json")
+API_BASE = "http://localhost:8000"
 
 
-def load_expenses() -> list[dict]:
-    if DATA_FILE.exists():
-        return json.loads(DATA_FILE.read_text())
-    return []
+# ── API helpers ───────────────────────────────────────────────────────────────
 
-
-def save_expenses(expenses: list[dict]) -> None:
-    DATA_FILE.write_text(json.dumps(expenses, indent=2))
-
-
-def load_budgets() -> dict:
-    if BUDGETS_FILE.exists():
-        return json.loads(BUDGETS_FILE.read_text())
-    return {}
-
-
-def save_budgets(budgets: dict) -> None:
-    BUDGETS_FILE.write_text(json.dumps(budgets, indent=2))
-
-
-def parse_amount(raw) -> float:
+def api_get(path: str, **params):
     try:
-        amount = float(raw)
-    except (ValueError, TypeError):
-        raise ValueError(f"'{raw}' is not a valid number.")
-    if amount <= 0:
-        raise ValueError(f"Amount must be positive, got {amount}.")
-    return amount
+        r = requests.get(f"{API_BASE}{path}", params=params, timeout=5)
+        r.raise_for_status()
+        return r.json()
+    except requests.ConnectionError:
+        st.error("Cannot reach the API — is `uvicorn api:app` running on port 8000?")
+        st.stop()
 
 
-def parse_category(raw: str) -> str:
-    category = raw.strip().lower()
-    if not category:
-        raise ValueError("Category cannot be empty.")
-    return category
+def api_post(path: str, body: dict):
+    try:
+        r = requests.post(f"{API_BASE}{path}", json=body, timeout=5)
+        r.raise_for_status()
+        return r.json()
+    except requests.ConnectionError:
+        st.error("Cannot reach the API — is `uvicorn api:app` running on port 8000?")
+        st.stop()
+    except requests.HTTPError:
+        detail = r.json().get("detail", r.text)
+        raise ValueError(detail)
+
+
+def api_delete(path: str):
+    try:
+        r = requests.delete(f"{API_BASE}{path}", timeout=5)
+        r.raise_for_status()
+        return r.json()
+    except requests.ConnectionError:
+        st.error("Cannot reach the API — is `uvicorn api:app` running on port 8000?")
+        st.stop()
+    except requests.HTTPError:
+        detail = r.json().get("detail", r.text)
+        raise ValueError(detail)
 
 
 # ── Page config ───────────────────────────────────────────────────────────────
@@ -74,19 +71,14 @@ if page == "Dashboard":
 
     if submitted:
         try:
-            category = parse_category(category_input)
-            amount = parse_amount(amount_input)
-            expenses = load_expenses()
-            entry = {
-                "category": category,
-                "amount": amount,
+            body = {
+                "category": category_input,
+                "amount": amount_input,
                 "date": str(date_input),
+                "notes": notes_input.strip() or None,
             }
-            if notes_input.strip():
-                entry["notes"] = notes_input.strip()
-            expenses.append(entry)
-            save_expenses(expenses)
-            st.sidebar.success(f"Added ${amount:.2f} to '{category}'")
+            entry = api_post("/expenses", body)
+            st.sidebar.success(f"Added ${entry['amount']:.2f} to '{entry['category']}'")
             st.rerun()
         except ValueError as e:
             st.sidebar.error(str(e))
@@ -98,8 +90,8 @@ if page == "Dashboard":
 if page == "Dashboard":
     st.title("💰 Expense Dashboard")
 
-    expenses = load_expenses()
-    budgets = load_budgets()
+    expenses = api_get("/expenses")
+    budgets = api_get("/budgets")
 
     if not expenses:
         st.info("No expenses yet. Add your first expense using the sidebar form.")
@@ -155,7 +147,6 @@ if page == "Dashboard":
         if df_month.empty:
             st.info("No expenses this month.")
         else:
-            # Fill in missing days with 0 so the line is continuous
             daily = df_month.groupby(df_month["date"].dt.date)["amount"].sum()
             month_start = today.replace(day=1)
             full_range = pd.date_range(month_start, today, freq="D").date
@@ -165,42 +156,38 @@ if page == "Dashboard":
 
     st.divider()
 
-    # ── Budget vs Actual table ────────────────────────────────────────────────
+    # ── Budget vs Actual table (from /monthly-report) ─────────────────────────
 
     st.subheader(f"Budget vs Actual — {month_str}")
 
-    month_totals = (
-        df_month.groupby("category")["amount"].sum().to_dict()
-        if not df_month.empty
-        else {}
-    )
-    all_categories = sorted(set(month_totals) | set(budgets))
+    report_rows = api_get("/monthly-report", month=month_str)
 
-    if not all_categories:
+    if not report_rows:
         st.info("No data for this month.")
     else:
         rows = []
-        for cat in all_categories:
-            spent = month_totals.get(cat, 0.0)
-            budget = budgets.get(cat)
-            if budget:
-                remaining = budget - spent
-                pct_used = spent / budget * 100
-                if spent > budget:
+        for r in report_rows:
+            spent = r["spent"]
+            budget = r["budget"]
+            remaining = r["remaining"]
+            status_key = r["status"]
+
+            if budget is not None:
+                pct_used = spent / budget * 100 if budget else 0
+                if status_key == "OVER":
                     status = "🔴 OVER"
-                elif pct_used >= 90:
+                elif status_key == "WARNING":
                     status = "🟡 WARNING"
                 else:
                     status = "🟢 OK"
             else:
-                remaining = None
                 pct_used = None
                 status = "—"
 
             rows.append({
-                "Category": cat.title(),
+                "Category": r["category"].title(),
                 "Spent ($)": f"{spent:.2f}",
-                "Budget ($)": f"{budget:.2f}" if budget else "N/A",
+                "Budget ($)": f"{budget:.2f}" if budget is not None else "N/A",
                 "Remaining ($)": f"{remaining:.2f}" if remaining is not None else "N/A",
                 "% Used": f"{pct_used:.1f}%" if pct_used is not None else "N/A",
                 "Status": status,
@@ -209,10 +196,10 @@ if page == "Dashboard":
         table_df = pd.DataFrame(rows)
 
         def row_style(row):
-            status = row["Status"]
-            if "OVER" in status:
+            s = row["Status"]
+            if "OVER" in s:
                 bg = "background-color: #fde8e8"
-            elif "WARNING" in status:
+            elif "WARNING" in s:
                 bg = "background-color: #fef9e7"
             else:
                 bg = ""
@@ -241,10 +228,9 @@ elif page == "Settings":
     st.title("⚙️ Budget Settings")
     st.caption("Set monthly spending limits per category.")
 
-    budgets = load_budgets()
-    expenses = load_expenses()
+    budgets = api_get("/budgets")
+    expenses = api_get("/expenses")
 
-    # Collect all known categories from expenses + existing budgets
     known_categories = sorted(
         {e["category"] for e in expenses} | set(budgets.keys())
     )
@@ -264,7 +250,6 @@ elif page == "Settings":
     st.subheader("Set / Update a Budget")
 
     with st.form("set_budget_form", clear_on_submit=True):
-        # Let user pick an existing category or type a new one
         category_options = known_categories + ["+ New category..."]
         selected = st.selectbox("Category", options=category_options)
         new_cat = ""
@@ -278,11 +263,8 @@ elif page == "Settings":
     if save_btn:
         raw_cat = new_cat if selected == "+ New category..." else selected
         try:
-            cat = parse_category(raw_cat)
-            amt = parse_amount(budget_amount)
-            budgets[cat] = amt
-            save_budgets(budgets)
-            st.success(f"Budget for '{cat}' set to ${amt:.2f}/month")
+            entry = api_post("/budgets", {"category": raw_cat, "amount": budget_amount})
+            st.success(f"Budget for '{entry['category']}' set to ${entry['amount']:.2f}/month")
             st.rerun()
         except ValueError as e:
             st.error(str(e))
@@ -296,8 +278,9 @@ elif page == "Settings":
             del_cat = st.selectbox("Select category to remove", options=sorted(budgets.keys()))
             del_btn = st.form_submit_button("Remove Budget", use_container_width=True)
         if del_btn:
-            removed = budgets.pop(del_cat, None)
-            if removed is not None:
-                save_budgets(budgets)
+            try:
+                api_delete(f"/budgets/{del_cat}")
                 st.success(f"Removed budget for '{del_cat}'")
                 st.rerun()
+            except ValueError as e:
+                st.error(str(e))
