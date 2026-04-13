@@ -4,7 +4,7 @@ import requests
 import streamlit as st
 import pandas as pd
 
-API_BASE = "http://localhost:8000"
+API_BASE = "https://expense-api-5azs.onrender.com"
 
 
 # ── API helpers ───────────────────────────────────────────────────────────────
@@ -15,7 +15,7 @@ def api_get(path: str, **params):
         r.raise_for_status()
         return r.json()
     except requests.ConnectionError:
-        st.error("Cannot reach the API — is `uvicorn api:app` running on port 8000?")
+        st.error("Cannot reach the API at expense-api-5azs.onrender.com — check your network connection.")
         st.stop()
 
 
@@ -25,7 +25,7 @@ def api_post(path: str, body: dict):
         r.raise_for_status()
         return r.json()
     except requests.ConnectionError:
-        st.error("Cannot reach the API — is `uvicorn api:app` running on port 8000?")
+        st.error("Cannot reach the API at expense-api-5azs.onrender.com — check your network connection.")
         st.stop()
     except requests.HTTPError:
         detail = r.json().get("detail", r.text)
@@ -38,7 +38,7 @@ def api_delete(path: str):
         r.raise_for_status()
         return r.json()
     except requests.ConnectionError:
-        st.error("Cannot reach the API — is `uvicorn api:app` running on port 8000?")
+        st.error("Cannot reach the API at expense-api-5azs.onrender.com — check your network connection.")
         st.stop()
     except requests.HTTPError:
         detail = r.json().get("detail", r.text)
