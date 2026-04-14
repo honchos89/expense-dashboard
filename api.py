@@ -1,5 +1,8 @@
+import json
+import os
 from collections import defaultdict
 from datetime import date
+from pathlib import Path
 from typing import Optional
 
 import gspread
@@ -14,7 +17,13 @@ SCOPES = [
     "https://www.googleapis.com/auth/drive",
 ]
 
-creds = Credentials.from_service_account_file("google-credentials.json", scopes=SCOPES)
+_creds_file = Path("google-credentials.json")
+if _creds_file.exists():
+    creds = Credentials.from_service_account_file(str(_creds_file), scopes=SCOPES)
+else:
+    _creds_json = json.loads(os.environ["GOOGLE_CREDENTIALS_JSON"])
+    creds = Credentials.from_service_account_info(_creds_json, scopes=SCOPES)
+
 gc = gspread.authorize(creds)
 sh = gc.open_by_key(SPREADSHEET_ID)
 

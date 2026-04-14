@@ -1,3 +1,4 @@
+import os
 from datetime import date
 
 import altair as alt
@@ -5,7 +6,7 @@ import pandas as pd
 import requests
 import streamlit as st
 
-API_BASE = "http://localhost:8000"
+API_BASE = os.environ.get("API_URL", "http://localhost:8000")
 
 
 # ── API helpers ───────────────────────────────────────────────────────────────
