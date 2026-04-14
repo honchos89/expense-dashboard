@@ -4,3 +4,4 @@ __pycache__/
 .env
 budgets.json
 expenses.json
+google-credentials.json

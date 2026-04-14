@@ -2,34 +2,75 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Commands
+## Running the app
 
 ```bash
-# Add an expense
+# Start the FastAPI backend (port 8000)
+uvicorn api:app --reload
+
+# Start the Streamlit dashboard (separate terminal)
+streamlit run app.py
+
+# Re-initialize Google Sheet tabs with sample data
+python setup_sheet.py
+```
+
+## Legacy CLI (expense_tracker.py)
+
+```bash
 python expense_tracker.py add <category> <amount>
-
-# Set a monthly budget for a category
 python expense_tracker.py set-budget <category> <amount>
-
-# All-time totals by category
 python expense_tracker.py summary
-
-# Monthly report vs budgets (defaults to current month)
 python expense_tracker.py monthly [YYYY-MM]
 ```
 
-No dependencies beyond the Python standard library.
-
 ## Architecture
 
-Single-file CLI (`expense_tracker.py`). All logic is flat functions — no classes.
+### Data layer — Google Sheets
 
-**Data layer** — two JSON files, read and written in full on every operation:
-- `expenses.json` — list of `{category, amount, date}` objects (date is `YYYY-MM-DD` string)
-- `budgets.json` — dict of `{category: monthly_limit}` (categories are the keys)
+All data lives in spreadsheet `1pUOXBYP5O8vb8Tq8SBI_JJxLbP40O8ahPKx_MKBTBOM`.
+Authentication uses a service account key at `google-credentials.json` (never committed — in .gitignore).
 
-**Validation** — `parse_amount()` and `parse_category()` raise `ValueError` with descriptive messages; callers in `__main__` catch and print them, then exit with code 1.
+Three tabs:
 
-**Monthly report logic** (`print_monthly_report`) — filters expenses by `date.startswith("YYYY-MM")`, then unions the resulting category set with all budgeted categories so budgeted-but-unspent categories always appear. Status thresholds: ≥90% of budget → WARNING, >100% → OVER.
+| Tab | Columns |
+|-----|---------|
+| **Expenses** | Date, Category, Amount, Merchant, Person, Source, Type, Notes |
+| **Budgets** | Category, MonthlyLimit, Person |
+| **NetWorth** | Month, Stocks, MutualFunds, FD_PPF, Crypto, Cash, Total |
 
-Categories are always normalized to lowercase at write time, so lookups are case-insensitive by construction.
+- `Person` values: `Saket`, `Wife`, or empty (shared/family)
+- `Type` values: `expense` or `investment`
+- `Source` values: `manual` or `auto`
+
+### api.py — FastAPI backend (localhost:8000)
+
+Connects to Google Sheets via gspread + service account at module load time.
+All endpoints read/write directly to Sheets on each request.
+
+Key endpoints:
+- `GET /expenses?month=YYYY-MM&person=Family|Saket|Wife&type=expense|investment|all`
+- `POST /expenses` — appends a row to Expenses tab
+- `GET /budgets?person=...` — returns list of `{category, monthly_limit, person}`
+- `POST /budgets` — upserts by category+person; `DELETE /budgets/{category}`
+- `GET /monthly-report?month=YYYY-MM&person=...` — budget vs actual for expense-type transactions
+- `GET /networth` — returns latest NetWorth row
+- `POST /networth` — appends a new monthly snapshot; total is computed server-side
+- `GET /monthly-history?person=...` — all months with `spending_ex_investment`, `invested`, `total_outflow`
+
+### app.py — Streamlit dashboard
+
+Personal finance dashboard at localhost:8501. Connects to API at `http://localhost:8000`.
+
+Top bar controls (Person × View × Month) filter all data globally.
+- **Person**: Family (no filter) / Saket / Wife
+- **View**: This month (detailed) / History (aggregate table + chart)
+- **Month**: current + last 12 months + Full year options
+
+Sections: 4 metric cards → spending vs budget tables → net worth breakdown → daily spend chart → recent transactions → monthly history table.
+
+Sidebar form adds expenses with full fields (category, amount, date, person, type, merchant, notes).
+
+### setup_sheet.py
+
+One-time setup script. Clears and re-creates all three tabs with headers and one sample row each.
