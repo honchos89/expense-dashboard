@@ -184,31 +184,33 @@ def _detect_bank(email_from: str) -> str:
 
 
 def _extract_amount(text: str) -> Optional[float]:
-    # Matches: Rs.1200.00 / Rs. 1,200.00 / Rs 1200 / INR 100 / INR1200.00
-    for pattern in [
-        r"Rs\.?\s*([\d,]+(?:\.\d+)?)",
-        r"INR\s*([\d,]+(?:\.\d+)?)",
-    ]:
-        m = re.search(pattern, text, re.IGNORECASE)
-        if m:
-            return float(m.group(1).replace(",", ""))
+    # Primary: Rs.1200.00 / Rs.10,413.00 (no space after Rs.)
+    m = re.search(r"Rs\.([0-9,]+\.?[0-9]*)", text)
+    if m:
+        return float(m.group(1).replace(",", ""))
+    # Secondary: INR 100 / INR 10,413.00
+    m = re.search(r"INR\s+([0-9,]+\.?[0-9]*)", text, re.IGNORECASE)
+    if m:
+        return float(m.group(1).replace(",", ""))
     return None
 
 
 def _extract_merchant_hdfc(text: str) -> str:
-    # UPI debit: "to VPA zomato@icici" → "zomato"
-    m = re.search(r"to\s+VPA\s+([^\s\n]+)", text, re.IGNORECASE)
+    # UPI: "to VPA zomato@okicici" — capture VPA, then check for a display name after it
+    m = re.search(r"to\s+VPA\s+(\S+)(.*?)(?:\.|Ref|on\s+\d|\n|$)", text, re.IGNORECASE)
     if m:
-        vpa = m.group(1).strip()
-        name = vpa.split("@")[0]
-        name = re.sub(r"\d+$", "", name).strip("._- ")
-        return name or vpa
+        vpa = m.group(1).strip().rstrip(".,")
+        after_vpa = m.group(2).strip()
+        # Prefer display name that follows the VPA address
+        if after_vpa and re.match(r"[A-Za-z]", after_vpa):
+            return after_vpa.split()[0].strip(".,")
+        # Fall back to handle before '@', strip trailing digits
+        handle = vpa.split("@")[0]
+        handle = re.sub(r"\d+$", "", handle).strip("._- ")
+        return handle or vpa
 
-    # Credit card: "towards Zomato on ..."
-    m = re.search(
-        r"towards\s+([A-Za-z0-9 &.\-]+?)(?:\s+on\b|\s+for\b|\s+dated\b|\.|\n|$)",
-        text, re.IGNORECASE,
-    )
+    # Credit card: "towards Zomato on 15-Apr-26" — capture between towards and "on <date>"
+    m = re.search(r"towards\s+(.+?)\s+on\s+\d", text, re.IGNORECASE)
     if m:
         return m.group(1).strip()
 
@@ -220,17 +222,20 @@ def _extract_merchant_hdfc(text: str) -> str:
     if m:
         return m.group(1).strip()
 
-    return ""
+    return "Unknown"
 
 
 def _extract_merchant_icici(text: str) -> str:
-    # UPI
-    m = re.search(r"to\s+VPA\s+([^\s\n]+)", text, re.IGNORECASE)
+    # UPI: same VPA pattern as HDFC
+    m = re.search(r"to\s+VPA\s+(\S+)(.*?)(?:\.|Ref|on\s+\d|\n|$)", text, re.IGNORECASE)
     if m:
-        vpa = m.group(1).strip()
-        name = vpa.split("@")[0]
-        name = re.sub(r"\d+$", "", name).strip("._- ")
-        return name or vpa
+        vpa = m.group(1).strip().rstrip(".,")
+        after_vpa = m.group(2).strip()
+        if after_vpa and re.match(r"[A-Za-z]", after_vpa):
+            return after_vpa.split()[0].strip(".,")
+        handle = vpa.split("@")[0]
+        handle = re.sub(r"\d+$", "", handle).strip("._- ")
+        return handle or vpa
 
     m = re.search(
         r"\bat\s+([A-Za-z0-9 &.\-]+?)(?:\s+on\b|\s+for\b|\.|\n|$)",
@@ -239,7 +244,7 @@ def _extract_merchant_icici(text: str) -> str:
     if m:
         return m.group(1).strip()
 
-    return ""
+    return "Unknown"
 
 
 def _extract_date(text: str) -> str:
@@ -555,7 +560,8 @@ def parse_email(payload: ParseEmailIn):
 
     amount = _extract_amount(body)
     if amount is None:
-        raise HTTPException(status_code=422, detail="Could not extract amount from email body")
+        return {"status": "skipped", "reason": "Could not extract amount",
+                "transaction_type": "unknown"}
 
     txn_date = _extract_date(body)
     is_refund = _is_refund(body)
@@ -571,7 +577,7 @@ def parse_email(payload: ParseEmailIn):
         elif bank == "ICICI":
             merchant = _extract_merchant_icici(body)
         else:
-            merchant = _extract_merchant_hdfc(body) or _extract_merchant_icici(body)
+            merchant = _extract_merchant_hdfc(body) or _extract_merchant_icici(body) or "Unknown"
         category = _categorize(merchant)
         txn_type = "expense"
         notes = bank
