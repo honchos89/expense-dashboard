@@ -195,24 +195,54 @@ def _extract_amount(text: str) -> Optional[float]:
     return None
 
 
+# Words that should never appear in a merchant name
+_NOISE_TAIL = re.compile(
+    r"\s*\b(Ref|Refno|No|UPI|IMPS|NEFT|RTGS|txn|transaction|transfer|"
+    r"[A-Z]{2}\d{9,}|\d{6,})\b.*$",
+    re.IGNORECASE,
+)
+
+
+def _clean_merchant(raw: str, max_words: int = 3) -> str:
+    """
+    Return a tidy merchant name from a raw extracted string.
+    - Strips trailing noise words (Ref, UPI, long numbers, dates).
+    - Returns at least 2 words when available, up to max_words.
+    """
+    s = _NOISE_TAIL.sub("", raw).strip(" ,.-/")
+    words = s.split()
+    # Drop trailing tokens that are pure numbers / date-like
+    while words and re.fullmatch(r"[\d,./\-]+", words[-1]):
+        words.pop()
+    # Minimum 2 words where possible, cap at max_words
+    words = words[:max_words]
+    return " ".join(words) if words else raw.strip()
+
+
 def _extract_merchant_hdfc(text: str) -> str:
-    # UPI: "to VPA zomato@okicici" — capture VPA, then check for a display name after it
-    m = re.search(r"to\s+VPA\s+(\S+)(.*?)(?:\.|Ref|on\s+\d|\n|$)", text, re.IGNORECASE)
+    # UPI: "to VPA paytmqr6x@ptys MANAK MEWA SAHAKARA NAGAR"
+    # Capture everything after the VPA address up to a sentence-ending boundary.
+    m = re.search(
+        r"to\s+VPA\s+\S+\s+([A-Za-z][A-Za-z0-9 &./\-]*?)(?:\s*\.\s*|\s*Ref\b|\s+on\s+\d|\n|$)",
+        text, re.IGNORECASE,
+    )
     if m:
-        vpa = m.group(1).strip().rstrip(".,")
-        after_vpa = m.group(2).strip()
-        # Prefer display name that follows the VPA address
-        if after_vpa and re.match(r"[A-Za-z]", after_vpa):
-            return after_vpa.split()[0].strip(".,")
-        # Fall back to handle before '@', strip trailing digits
+        display = m.group(1).strip()
+        if display:
+            return _clean_merchant(display, max_words=3)
+
+    # VPA only (no display name): fall back to handle before '@'
+    m = re.search(r"to\s+VPA\s+(\S+)", text, re.IGNORECASE)
+    if m:
+        vpa = m.group(1).rstrip(".,")
         handle = vpa.split("@")[0]
         handle = re.sub(r"\d+$", "", handle).strip("._- ")
         return handle or vpa
 
-    # Credit card: "towards Zomato on 15-Apr-26" — capture between towards and "on <date>"
+    # Credit card: "towards GYFTR VIA SMARTBUY on 09 Apr"
     m = re.search(r"towards\s+(.+?)\s+on\s+\d", text, re.IGNORECASE)
     if m:
-        return m.group(1).strip()
+        return _clean_merchant(m.group(1), max_words=4)
 
     # "at <merchant>" fallback
     m = re.search(
@@ -220,19 +250,36 @@ def _extract_merchant_hdfc(text: str) -> str:
         text, re.IGNORECASE,
     )
     if m:
-        return m.group(1).strip()
+        return _clean_merchant(m.group(1))
 
     return "Unknown"
 
 
 def _extract_merchant_icici(text: str) -> str:
-    # UPI: same VPA pattern as HDFC
-    m = re.search(r"to\s+VPA\s+(\S+)(.*?)(?:\.|Ref|on\s+\d|\n|$)", text, re.IGNORECASE)
+    # ICICI UPI "Info:" field: "Info: UPI/412345/ZOMATO INTERNET P/zomato@icici"
+    # Format is typically UPI/<refno>/<PayeeName>/<vpa>
+    m = re.search(r"Info:\s*([^\n]+)", text, re.IGNORECASE)
     if m:
-        vpa = m.group(1).strip().rstrip(".,")
-        after_vpa = m.group(2).strip()
-        if after_vpa and re.match(r"[A-Za-z]", after_vpa):
-            return after_vpa.split()[0].strip(".,")
+        parts = [p.strip() for p in m.group(1).split("/")]
+        # Index 2 is PayeeName in standard UPI info string; index 1 if shorter
+        for idx in (2, 1):
+            if len(parts) > idx and re.search(r"[A-Za-z]", parts[idx]):
+                return _clean_merchant(parts[idx], max_words=3)
+
+    # VPA display-name pattern (same as HDFC)
+    m = re.search(
+        r"to\s+VPA\s+\S+\s+([A-Za-z][A-Za-z0-9 &./\-]*?)(?:\s*\.\s*|\s*Ref\b|\s+on\s+\d|\n|$)",
+        text, re.IGNORECASE,
+    )
+    if m:
+        display = m.group(1).strip()
+        if display:
+            return _clean_merchant(display, max_words=3)
+
+    # VPA handle fallback
+    m = re.search(r"to\s+VPA\s+(\S+)", text, re.IGNORECASE)
+    if m:
+        vpa = m.group(1).rstrip(".,")
         handle = vpa.split("@")[0]
         handle = re.sub(r"\d+$", "", handle).strip("._- ")
         return handle or vpa
@@ -242,7 +289,7 @@ def _extract_merchant_icici(text: str) -> str:
         text, re.IGNORECASE,
     )
     if m:
-        return m.group(1).strip()
+        return _clean_merchant(m.group(1))
 
     return "Unknown"
 
