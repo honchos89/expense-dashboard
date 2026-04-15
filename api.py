@@ -1,5 +1,6 @@
 import json
 import os
+import re
 from collections import defaultdict
 from datetime import date
 from pathlib import Path
@@ -163,6 +164,187 @@ class NetWorthIn(BaseModel):
     fd_ppf: float
     crypto: float
     cash: float
+
+
+class ParseEmailIn(BaseModel):
+    email_body: str
+    email_from: str
+    person: Optional[str] = None
+
+
+# ── Email parsing helpers ─────────────────────────────────────────────────────
+
+def _detect_bank(email_from: str) -> str:
+    sender = email_from.lower()
+    if "hdfcbank" in sender:
+        return "HDFC"
+    if "icici" in sender:
+        return "ICICI"
+    return "UNKNOWN"
+
+
+def _extract_amount(text: str) -> Optional[float]:
+    # Matches: Rs.1200.00 / Rs. 1,200.00 / Rs 1200 / INR 100 / INR1200.00
+    for pattern in [
+        r"Rs\.?\s*([\d,]+(?:\.\d+)?)",
+        r"INR\s*([\d,]+(?:\.\d+)?)",
+    ]:
+        m = re.search(pattern, text, re.IGNORECASE)
+        if m:
+            return float(m.group(1).replace(",", ""))
+    return None
+
+
+def _extract_merchant_hdfc(text: str) -> str:
+    # UPI debit: "to VPA zomato@icici" → "zomato"
+    m = re.search(r"to\s+VPA\s+([^\s\n]+)", text, re.IGNORECASE)
+    if m:
+        vpa = m.group(1).strip()
+        name = vpa.split("@")[0]
+        name = re.sub(r"\d+$", "", name).strip("._- ")
+        return name or vpa
+
+    # Credit card: "towards Zomato on ..."
+    m = re.search(
+        r"towards\s+([A-Za-z0-9 &.\-]+?)(?:\s+on\b|\s+for\b|\s+dated\b|\.|\n|$)",
+        text, re.IGNORECASE,
+    )
+    if m:
+        return m.group(1).strip()
+
+    # "at <merchant>" fallback
+    m = re.search(
+        r"\bat\s+([A-Za-z0-9 &.\-]+?)(?:\s+on\b|\s+for\b|\.|\n|$)",
+        text, re.IGNORECASE,
+    )
+    if m:
+        return m.group(1).strip()
+
+    return ""
+
+
+def _extract_merchant_icici(text: str) -> str:
+    # UPI
+    m = re.search(r"to\s+VPA\s+([^\s\n]+)", text, re.IGNORECASE)
+    if m:
+        vpa = m.group(1).strip()
+        name = vpa.split("@")[0]
+        name = re.sub(r"\d+$", "", name).strip("._- ")
+        return name or vpa
+
+    m = re.search(
+        r"\bat\s+([A-Za-z0-9 &.\-]+?)(?:\s+on\b|\s+for\b|\.|\n|$)",
+        text, re.IGNORECASE,
+    )
+    if m:
+        return m.group(1).strip()
+
+    return ""
+
+
+def _extract_date(text: str) -> str:
+    # ISO: 2026-04-15
+    m = re.search(r"\b(\d{4}-\d{2}-\d{2})\b", text)
+    if m:
+        return m.group(1)
+
+    # DD-MM-YYYY or DD/MM/YYYY
+    m = re.search(r"\b(\d{2})[/-](\d{2})[/-](\d{4})\b", text)
+    if m:
+        return f"{m.group(3)}-{m.group(2)}-{m.group(1)}"
+
+    # "15 Apr 2026" or "15-Apr-2026"
+    _MONTHS = {
+        "jan": "01", "feb": "02", "mar": "03", "apr": "04",
+        "may": "05", "jun": "06", "jul": "07", "aug": "08",
+        "sep": "09", "oct": "10", "nov": "11", "dec": "12",
+    }
+    m = re.search(
+        r"\b(\d{1,2})[\s\-](Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[\s\-,]+(\d{4})\b",
+        text, re.IGNORECASE,
+    )
+    if m:
+        day = m.group(1).zfill(2)
+        mon = _MONTHS[m.group(2)[:3].lower()]
+        return f"{m.group(3)}-{mon}-{day}"
+
+    return str(date.today())
+
+
+_MERCHANT_CATEGORIES: dict[str, list[str]] = {
+    "food": ["zomato", "swiggy", "bigbasket", "blinkit", "dominos", "pizza",
+             "mcdonalds", "kfc", "subway", "dunkin", "starbucks", "cafe",
+             "restaurant", "foodpanda", "eatsure", "zepto"],
+    "transport": ["ola", "uber", "rapido", "metro", "irctc", "railway",
+                  "makemytrip", "goibibo", "indigo", "spicejet", "airindia"],
+    "shopping": ["amazon", "flipkart", "myntra", "ajio", "nykaa", "meesho",
+                 "snapdeal", "instamart"],
+    "utilities": ["airtel", "jio", "bsnl", "vodafone", "electricity", "water",
+                  "mahanagar", "tatapower", "bescom", "bses", "postpaid", "broadband"],
+    "health": ["apollo", "pharmeasy", "1mg", "pharmacy", "medical", "hospital",
+               "medplus", "practo", "netmeds", "clinic"],
+    "entertainment": ["netflix", "hotstar", "spotify", "primevideo", "youtube",
+                      "bookmyshow", "pvr", "inox", "jiocinema"],
+}
+
+
+def _categorize(merchant: str) -> str:
+    m_lower = merchant.lower()
+    if m_lower.startswith("refund"):
+        return "refund"
+    for category, keywords in _MERCHANT_CATEGORIES.items():
+        if any(kw in m_lower for kw in keywords):
+            return category
+    return "general"
+
+
+# Refund/reversal signal words
+_REFUND_PATTERN = re.compile(
+    r"\b(refund|reversal|reversed|cashback|chargeback|money\s+back|credited\s+back)\b",
+    re.IGNORECASE,
+)
+
+# Known merchants to look for inside refund emails
+_KNOWN_MERCHANTS = [
+    "zomato", "swiggy", "bigbasket", "blinkit", "amazon", "flipkart", "myntra",
+    "ola", "uber", "rapido", "netflix", "hotstar", "spotify", "airtel", "jio",
+    "apollo", "pharmeasy", "1mg", "irctc", "makemytrip", "goibibo", "dominos",
+    "mcdonalds", "kfc", "nykaa", "ajio", "meesho",
+]
+
+
+def _is_refund(text: str) -> bool:
+    return bool(_REFUND_PATTERN.search(text))
+
+
+def _extract_refund_merchant(text: str) -> str:
+    """Return 'Refund - <Merchant>' if original merchant is detectable, else 'Refund'."""
+    t_lower = text.lower()
+    for name in _KNOWN_MERCHANTS:
+        if name in t_lower:
+            return f"Refund - {name.capitalize()}"
+    # Try "refund from <name>" or "refund for <name>"
+    m = re.search(
+        r"refund\s+(?:from|for|of|by)\s+([A-Za-z0-9 &.\-]+?)(?:\s+on\b|\s+of\b|\.|\n|$)",
+        text, re.IGNORECASE,
+    )
+    if m:
+        return f"Refund - {m.group(1).strip().title()}"
+    return "Refund"
+
+
+def _is_credit_alert(text: str, bank: str) -> bool:
+    """Return True only for non-refund credits (salary, deposit, etc.) on ICICI."""
+    if bank != "ICICI":
+        return False
+    if _is_refund(text):
+        return False  # Refunds are credits we do want to record
+    t = text.lower()
+    has_credit = bool(re.search(
+        r"\bcredited\b|\bcredit of\b|\bdeposited\b|\breceived rs\b|\badded to\b", t
+    ))
+    has_debit = bool(re.search(r"\bdebited\b|\bdebit of\b|\bspent\b|\bpayment of\b", t))
+    return has_credit and not has_debit
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
@@ -359,3 +541,57 @@ def monthly_history(person: Optional[str] = Query(None)):
             "total_outflow": spending + invested,
         })
     return result
+
+
+@app.post("/parse-email")
+def parse_email(payload: ParseEmailIn):
+    bank = _detect_bank(payload.email_from)
+    body = payload.email_body
+
+    # Skip non-refund credit alerts (salary deposits, etc.)
+    if _is_credit_alert(body, bank):
+        return {"status": "success", "transaction_type": "skipped", "amount": None,
+                "merchant": None, "category": None}
+
+    amount = _extract_amount(body)
+    if amount is None:
+        raise HTTPException(status_code=422, detail="Could not extract amount from email body")
+
+    txn_date = _extract_date(body)
+    is_refund = _is_refund(body)
+
+    if is_refund:
+        merchant = _extract_refund_merchant(body)
+        category = "refund"
+        txn_type = "refund"
+        notes = f"{bank} refund"
+    else:
+        if bank == "HDFC":
+            merchant = _extract_merchant_hdfc(body)
+        elif bank == "ICICI":
+            merchant = _extract_merchant_icici(body)
+        else:
+            merchant = _extract_merchant_hdfc(body) or _extract_merchant_icici(body)
+        category = _categorize(merchant)
+        txn_type = "expense"
+        notes = bank
+
+    entry = {
+        "date": txn_date,
+        "category": category,
+        "amount": amount,
+        "merchant": merchant,
+        "person": payload.person or "",
+        "source": "auto",
+        "type": txn_type,
+        "notes": notes,
+    }
+    append_expense_row(entry)
+
+    return {
+        "status": "success",
+        "transaction_type": txn_type,
+        "amount": amount,
+        "merchant": merchant,
+        "category": category,
+    }
