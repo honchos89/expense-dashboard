@@ -146,15 +146,21 @@ networth = api_get("/networth")
 
 # ── 4 Metric cards ────────────────────────────────────────────────────────────
 
-spending_total = sum(e["amount"] for e in month_expenses)
+spending_total = sum(e["amount"] for e in month_expenses if e["amount"] > 0)
 invested_total = sum(e["amount"] for e in month_investments)
-total_outflow = spending_total + invested_total
+month_refunds = [e for e in all_expenses if e.get("type") == "refund"]
+total_refunds = sum(abs(e["amount"]) for e in month_refunds if e["amount"] < 0)
+net_spending = spending_total - total_refunds
+total_outflow = net_spending + invested_total
 nw_total = networth["total"] if networth else 0
 
 m1, m2, m3, m4 = st.columns(4)
 m1.metric("Net Worth", fmt_inr(nw_total))
-m2.metric("Spending (ex-investment)", fmt_inr(spending_total))
-m3.metric("Invested", fmt_inr(invested_total))
+with m2:
+    st.metric("Net Spending (after refunds)", fmt_inr(net_spending))
+    if total_refunds > 0:
+        st.caption(f"Refunds: {fmt_inr(total_refunds)}")
+m3.metric("Invested This Month", fmt_inr(invested_total))
 m4.metric("Total Outflow", fmt_inr(total_outflow))
 
 st.divider()
@@ -260,7 +266,7 @@ if view == "This month":
         else:
             st.info("No investments this period.")
 
-    st.markdown(f"**Grand Total Outflow: {fmt_inr(total_outflow)}**")
+    st.markdown(f"**Grand Total Outflow: {fmt_inr(total_outflow)}** &nbsp; (Spending {fmt_inr(spending_total)} − Refunds {fmt_inr(total_refunds)} + Invested {fmt_inr(invested_total)})", unsafe_allow_html=True)
 
     st.divider()
 
