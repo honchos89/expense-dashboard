@@ -376,9 +376,9 @@ def _is_refund(text: str) -> bool:
 
 def _extract_refund_merchant(text: str) -> str:
     """Return 'Refund - <Merchant>' if original merchant is detectable, else 'Refund'."""
-    # "From Merchant:A SB EMT FLIGHT" pattern in bank reversal emails
+    # "From Merchant:A SB EMT FLIGHT Date Time: ..." pattern in bank reversal emails
     m = re.search(
-        r"From\s+Merchant\s*[:\-]\s*([A-Za-z0-9 &./\-]+?)(?:\n|$|\.|To\s+Merchant)",
+        r"From\s+Merchant\s*[:\-]\s*([A-Za-z0-9 &./\-]+?)(?:\s+Date\s+Time\b|\s+Ref\b|\n|$|\.)",
         text, re.IGNORECASE,
     )
     if m:
