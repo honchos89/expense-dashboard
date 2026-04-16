@@ -74,3 +74,7 @@ Sidebar form adds expenses with full fields (category, amount, date, person, typ
 ### setup_sheet.py
 
 One-time setup script. Clears and re-creates all three tabs with headers and one sample row each.
+
+## Make.com Gmail automation
+
+The Make.com scenario routes bank alert emails to `/parse-email`. The Gmail trigger module's **"Has the words"** filter should be **left empty** — do not set it to "debited". The Router branches downstream handle filtering by transaction type (debit vs. reversal). If the filter is set to "debited", reversal emails (which contain "transaction reversal" or "reversal of Rs" but not "debited") will never reach the webhook.

@@ -300,12 +300,17 @@ def _extract_date(text: str) -> str:
     if m:
         return m.group(1)
 
-    # DD-MM-YYYY or DD/MM/YYYY
+    # DD-MM-YYYY or DD/MM/YYYY (4-digit year)
     m = re.search(r"\b(\d{2})[/-](\d{2})[/-](\d{4})\b", text)
     if m:
         return f"{m.group(3)}-{m.group(2)}-{m.group(1)}"
 
-    # "15 Apr 2026" or "15-Apr-2026"
+    # DD-MM-YY (2-digit year, e.g., "on 12-04-26" → 2026-04-12)
+    m = re.search(r"\b(\d{2})[/-](\d{2})[/-](\d{2})\b", text)
+    if m:
+        return f"20{m.group(3)}-{m.group(2)}-{m.group(1)}"
+
+    # "15 Apr 2026", "15 Apr, 2026", "15 Apr, 2026 at 18:30"
     _MONTHS = {
         "jan": "01", "feb": "02", "mar": "03", "apr": "04",
         "may": "05", "jun": "06", "jul": "07", "aug": "08",
@@ -371,6 +376,16 @@ def _is_refund(text: str) -> bool:
 
 def _extract_refund_merchant(text: str) -> str:
     """Return 'Refund - <Merchant>' if original merchant is detectable, else 'Refund'."""
+    # "From Merchant:A SB EMT FLIGHT" pattern in bank reversal emails
+    m = re.search(
+        r"From\s+Merchant\s*[:\-]\s*([A-Za-z0-9 &./\-]+?)(?:\n|$|\.|To\s+Merchant)",
+        text, re.IGNORECASE,
+    )
+    if m:
+        merchant = _clean_merchant(m.group(1).strip(), max_words=4)
+        if merchant:
+            return f"Refund - {merchant}"
+
     t_lower = text.lower()
     for name in _KNOWN_MERCHANTS:
         if name in t_lower:
