@@ -71,6 +71,26 @@ def person_param(person: str):
 # ── Page config ───────────────────────────────────────────────────────────────
 
 st.set_page_config(page_title="Personal Finance Dashboard", layout="wide")
+
+# ── Password gate ─────────────────────────────────────────────────────────────
+
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+
+if not st.session_state.authenticated:
+    col_l, col_c, col_r = st.columns([1, 1, 1])
+    with col_c:
+        st.markdown("## Personal Finance Dashboard")
+        st.markdown("Enter password to continue.")
+        pwd = st.text_input("Password", type="password", key="login_pwd")
+        if st.button("Login", use_container_width=True):
+            if pwd == st.secrets["APP_PASSWORD"]:
+                st.session_state.authenticated = True
+                st.rerun()
+            else:
+                st.error("Incorrect password.")
+    st.stop()
+
 st.title("Personal Finance Dashboard")
 
 # ── Top bar ───────────────────────────────────────────────────────────────────

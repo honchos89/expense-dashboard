@@ -5,3 +5,4 @@ __pycache__/
 budgets.json
 expenses.json
 google-credentials.json
+.streamlit/secrets.toml
