@@ -38,6 +38,19 @@ def api_post(path: str, body: dict):
         raise ValueError(detail)
 
 
+def api_patch(path: str, body: dict):
+    try:
+        r = requests.patch(f"{API_BASE}{path}", json=body, timeout=10)
+        r.raise_for_status()
+        return r.json()
+    except requests.ConnectionError:
+        st.error("Cannot reach the API at localhost:8000")
+        st.stop()
+    except requests.HTTPError:
+        detail = r.json().get("detail", r.text)
+        raise ValueError(detail)
+
+
 # ── Utilities ─────────────────────────────────────────────────────────────────
 
 def fmt_inr(amount: float) -> str:
@@ -99,7 +112,7 @@ tb1, tb2, tb3, _ = st.columns([2, 2, 3, 3])
 with tb1:
     person = st.radio("Person", ["Family", "Saket", "Wife"], horizontal=True)
 with tb2:
-    view = st.radio("View", ["This month", "History"], horizontal=True)
+    view = st.radio("View", ["This month", "History", "Portfolio"], horizontal=True)
 with tb3:
     month_options = get_month_options()
     selected_month = st.selectbox("Month", month_options)
@@ -162,7 +175,8 @@ else:
     month_expenses = [e for e in all_expenses if e["type"] == "expense"]
     month_investments = [e for e in all_expenses if e["type"] == "investment"]
 
-networth = api_get("/networth")
+portfolio_data = api_get("/portfolio") or {"assets": [], "summary": {}}
+portfolio_summary = portfolio_data.get("summary", {})
 
 # ── 4 Metric cards ────────────────────────────────────────────────────────────
 
@@ -172,7 +186,7 @@ month_refunds = [e for e in all_expenses if e.get("type") == "refund"]
 total_refunds = sum(abs(e["amount"]) for e in month_refunds if e["amount"] < 0)
 net_spending = spending_total - total_refunds
 total_outflow = net_spending + invested_total
-nw_total = networth["total"] if networth else 0
+nw_total = portfolio_summary.get("total_net_worth", 0)
 
 m1, m2, m3, m4 = st.columns(4)
 m1.metric("Net Worth", fmt_inr(nw_total))
@@ -293,13 +307,13 @@ if view == "This month":
     # ── Net worth breakdown ───────────────────────────────────────────────────
 
     st.subheader("Net Worth Breakdown")
-    if networth:
+    if portfolio_summary:
         nw_items = [
-            ("Stocks", networth["stocks"]),
-            ("Mutual Funds", networth["mutual_funds"]),
-            ("FD / PPF", networth["fd_ppf"]),
-            ("Crypto", networth["crypto"]),
-            ("Cash", networth["cash"]),
+            ("Stocks", portfolio_summary.get("total_stocks", 0)),
+            ("Mutual Funds", portfolio_summary.get("total_mutual_funds", 0)),
+            ("Insurance", portfolio_summary.get("total_insurance", 0)),
+            ("Annuity", portfolio_summary.get("total_annuity", 0)),
+            ("Cash", portfolio_summary.get("total_cash", 0)),
         ]
         nw_cols = st.columns(len(nw_items))
         for col, (label, val) in zip(nw_cols, nw_items):
@@ -447,3 +461,68 @@ elif view == "History":
             st.altair_chart(chart, use_container_width=True)
     else:
         st.info("No history data available yet.")
+
+# ═════════════════════════════════════════════════════════════════════════════
+# PORTFOLIO VIEW
+# ═════════════════════════════════════════════════════════════════════════════
+
+elif view == "Portfolio":
+
+    st.subheader("Portfolio")
+
+    # ── Summary cards ─────────────────────────────────────────────────────────
+
+    p1, p2, p3, p4, p5, p6 = st.columns(6)
+    p1.metric("Stocks", fmt_inr(portfolio_summary.get("total_stocks", 0)))
+    p2.metric("Mutual Funds", fmt_inr(portfolio_summary.get("total_mutual_funds", 0)))
+    p3.metric("Insurance", fmt_inr(portfolio_summary.get("total_insurance", 0)))
+    p4.metric("Annuity", fmt_inr(portfolio_summary.get("total_annuity", 0)))
+    p5.metric("Cash", fmt_inr(portfolio_summary.get("total_cash", 0)))
+    p6.metric("Total Net Worth", fmt_inr(portfolio_summary.get("total_net_worth", 0)))
+
+    st.divider()
+
+    # ── Assets table grouped by AssetClass ────────────────────────────────────
+
+    assets = portfolio_data.get("assets", [])
+    if assets:
+        df_assets = pd.DataFrame(assets)
+        for asset_class in df_assets["asset_class"].unique():
+            st.markdown(f"**{asset_class}**")
+            group = df_assets[df_assets["asset_class"] == asset_class][
+                ["institution", "current_value", "last_updated"]
+            ].copy()
+            group.columns = ["Institution", "Current Value (₹)", "Last Updated"]
+            group["Current Value (₹)"] = group["Current Value (₹)"].apply(fmt_inr)
+            st.dataframe(group, use_container_width=True, hide_index=True)
+    else:
+        st.info("No portfolio data available.")
+
+    st.divider()
+
+    # ── Edit Values ───────────────────────────────────────────────────────────
+
+    st.markdown("**Edit Values**")
+
+    if assets:
+        asset_options = [
+            f"{a['asset_class']} — {a['institution']}" for a in assets
+        ]
+        with st.form("edit_portfolio_form", clear_on_submit=True):
+            selected = st.selectbox("Select asset", asset_options)
+            new_value = st.number_input("New value (₹)", min_value=0.0, step=1000.0, format="%.0f")
+            submitted = st.form_submit_button("Update", use_container_width=False)
+
+        if submitted:
+            idx = asset_options.index(selected)
+            chosen = assets[idx]
+            try:
+                api_patch("/portfolio", {
+                    "asset_class": chosen["asset_class"],
+                    "institution": chosen["institution"],
+                    "current_value": new_value,
+                })
+                st.success(f"Updated {chosen['institution']} ({chosen['asset_class']}) to {fmt_inr(new_value)}")
+                st.rerun()
+            except ValueError as e:
+                st.error(str(e))

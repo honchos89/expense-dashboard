@@ -108,6 +108,25 @@ def load_networth_list() -> list[dict]:
     return result
 
 
+def load_portfolio_list() -> list[dict]:
+    ws = sh.worksheet("Portfolio")
+    records = ws.get_all_records()
+    result = []
+    for r in records:
+        asset_class = str(r.get("AssetClass", "")).strip()
+        if not asset_class:
+            continue
+        result.append({
+            "asset_class": asset_class,
+            "sub_category": str(r.get("SubCategory", "")),
+            "institution": str(r.get("Institution", "")),
+            "current_value": float(r.get("CurrentValue", 0) or 0),
+            "last_updated": str(r.get("LastUpdated", "")),
+            "notes": str(r.get("Notes", "")),
+        })
+    return result
+
+
 # ── Request models ────────────────────────────────────────────────────────────
 
 class ExpenseIn(BaseModel):
@@ -170,6 +189,12 @@ class ParseEmailIn(BaseModel):
     email_body: str
     email_from: str
     person: Optional[str] = None
+
+
+class PortfolioUpdateIn(BaseModel):
+    asset_class: str
+    institution: str
+    current_value: float
 
 
 # ── Email parsing helpers ─────────────────────────────────────────────────────
@@ -561,8 +586,61 @@ def delete_budget(category: str, person: Optional[str] = Query(None)):
 
 @app.get("/networth")
 def get_networth():
-    records = load_networth_list()
-    return records[-1] if records else None
+    assets = load_portfolio_list()
+    stocks = sum(a["current_value"] for a in assets if a["asset_class"].lower() == "stocks")
+    mutual_funds = sum(a["current_value"] for a in assets if a["asset_class"].lower() == "mutual funds")
+    insurance = sum(a["current_value"] for a in assets if a["asset_class"].lower() == "insurance")
+    annuity = sum(a["current_value"] for a in assets if a["asset_class"].lower() == "annuity")
+    cash = sum(a["current_value"] for a in assets if a["asset_class"].lower() == "cash")
+    return {
+        "stocks": stocks,
+        "mutual_funds": mutual_funds,
+        "fd_ppf": insurance + annuity,
+        "crypto": 0.0,
+        "cash": cash,
+        "total": stocks + mutual_funds + insurance + annuity + cash,
+    }
+
+
+@app.get("/portfolio")
+def get_portfolio():
+    assets = load_portfolio_list()
+    total_stocks = sum(a["current_value"] for a in assets if a["asset_class"].lower() == "stocks")
+    total_mutual_funds = sum(a["current_value"] for a in assets if a["asset_class"].lower() == "mutual funds")
+    total_insurance = sum(a["current_value"] for a in assets if a["asset_class"].lower() == "insurance")
+    total_annuity = sum(a["current_value"] for a in assets if a["asset_class"].lower() == "annuity")
+    total_cash = sum(a["current_value"] for a in assets if a["asset_class"].lower() == "cash")
+    total_net_worth = total_stocks + total_mutual_funds + total_insurance + total_annuity + total_cash
+    return {
+        "assets": assets,
+        "summary": {
+            "total_stocks": total_stocks,
+            "total_mutual_funds": total_mutual_funds,
+            "total_insurance": total_insurance,
+            "total_annuity": total_annuity,
+            "total_cash": total_cash,
+            "total_net_worth": total_net_worth,
+        },
+    }
+
+
+@app.patch("/portfolio")
+def update_portfolio(update: PortfolioUpdateIn):
+    ws = sh.worksheet("Portfolio")
+    records = ws.get_all_records()
+    for i, r in enumerate(records, start=2):
+        r_class = str(r.get("AssetClass", "")).strip().lower()
+        r_inst = str(r.get("Institution", "")).strip().lower()
+        if r_class == update.asset_class.strip().lower() and r_inst == update.institution.strip().lower():
+            ws.update([[update.current_value]], f"D{i}")
+            ws.update([[str(date.today())]], f"E{i}")
+            return {
+                "status": "updated",
+                "asset_class": update.asset_class,
+                "institution": update.institution,
+                "current_value": update.current_value,
+            }
+    raise HTTPException(status_code=404, detail=f"No portfolio entry for '{update.asset_class}' / '{update.institution}'.")
 
 
 @app.post("/networth", status_code=201)
