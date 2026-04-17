@@ -1,54 +1,200 @@
-import os
+import json
+from collections import defaultdict
 from datetime import date
+from pathlib import Path
 
 import altair as alt
+import gspread
 import pandas as pd
-import requests
 import streamlit as st
+from google.oauth2.service_account import Credentials
 
-API_BASE = os.environ.get("API_URL", "http://localhost:8000")
-
-
-# ── API helpers ───────────────────────────────────────────────────────────────
-
-def api_get(path: str, **params):
-    params = {k: v for k, v in params.items() if v is not None}
-    try:
-        r = requests.get(f"{API_BASE}{path}", params=params, timeout=10)
-        r.raise_for_status()
-        return r.json()
-    except requests.ConnectionError:
-        st.error("Cannot reach the API at localhost:8000 — start the server with: uvicorn api:app --reload")
-        st.stop()
-    except requests.HTTPError:
-        st.error(f"API error: {r.text}")
-        return None
+SPREADSHEET_ID = "1pUOXBYP5O8vb8Tq8SBI_JJxLbP40O8ahPKx_MKBTBOM"
+SCOPES = [
+    "https://spreadsheets.google.com/feeds",
+    "https://www.googleapis.com/auth/drive",
+]
 
 
-def api_post(path: str, body: dict):
-    try:
-        r = requests.post(f"{API_BASE}{path}", json=body, timeout=10)
-        r.raise_for_status()
-        return r.json()
-    except requests.ConnectionError:
-        st.error("Cannot reach the API at localhost:8000")
-        st.stop()
-    except requests.HTTPError:
-        detail = r.json().get("detail", r.text)
-        raise ValueError(detail)
+@st.cache_resource
+def _get_sheet():
+    _creds_file = Path("google-credentials.json")
+    if _creds_file.exists():
+        creds = Credentials.from_service_account_file(str(_creds_file), scopes=SCOPES)
+    else:
+        _creds_json = json.loads(st.secrets["GOOGLE_CREDENTIALS_JSON"])
+        creds = Credentials.from_service_account_info(_creds_json, scopes=SCOPES)
+    gc = gspread.authorize(creds)
+    return gc.open_by_key(SPREADSHEET_ID)
 
 
-def api_patch(path: str, body: dict):
-    try:
-        r = requests.patch(f"{API_BASE}{path}", json=body, timeout=10)
-        r.raise_for_status()
-        return r.json()
-    except requests.ConnectionError:
-        st.error("Cannot reach the API at localhost:8000")
-        st.stop()
-    except requests.HTTPError:
-        detail = r.json().get("detail", r.text)
-        raise ValueError(detail)
+# ── Sheet helpers ─────────────────────────────────────────────────────────────
+
+@st.cache_data(ttl=60)
+def load_expenses() -> list[dict]:
+    ws = _get_sheet().worksheet("Expenses")
+    result = []
+    for r in ws.get_all_records():
+        result.append({
+            "date": str(r.get("Date", "")),
+            "category": str(r.get("Category", "")).strip().lower(),
+            "amount": float(r.get("Amount", 0) or 0),
+            "merchant": str(r.get("Merchant", "")),
+            "person": str(r.get("Person", "")),
+            "source": str(r.get("Source", "manual")),
+            "type": str(r.get("Type", "expense")),
+            "notes": str(r.get("Notes", "")),
+        })
+    return [e for e in result if e["date"]]
+
+
+@st.cache_data(ttl=60)
+def load_budgets() -> list[dict]:
+    ws = _get_sheet().worksheet("Budgets")
+    result = []
+    for r in ws.get_all_records():
+        cat = str(r.get("Category", "")).strip().lower()
+        if not cat:
+            continue
+        result.append({
+            "category": cat,
+            "monthly_limit": float(r.get("MonthlyLimit", 0) or 0),
+            "person": str(r.get("Person", "Family")),
+        })
+    return result
+
+
+@st.cache_data(ttl=60)
+def load_portfolio() -> list[dict]:
+    ws = _get_sheet().worksheet("Portfolio")
+    result = []
+    for r in ws.get_all_records():
+        asset_class = str(r.get("AssetClass", "")).strip()
+        if not asset_class:
+            continue
+        result.append({
+            "asset_class": asset_class,
+            "sub_category": str(r.get("SubCategory", "")),
+            "institution": str(r.get("Institution", "")),
+            "current_value": float(r.get("CurrentValue", 0) or 0),
+            "last_updated": str(r.get("LastUpdated", "")),
+            "notes": str(r.get("Notes", "")),
+        })
+    return result
+
+
+# ── Computed data functions ───────────────────────────────────────────────────
+
+def get_portfolio_data() -> dict:
+    assets = load_portfolio()
+    total_stocks = sum(a["current_value"] for a in assets if a["asset_class"].lower() == "stocks")
+    total_mutual_funds = sum(a["current_value"] for a in assets if a["asset_class"].lower() == "mutual funds")
+    total_insurance = sum(a["current_value"] for a in assets if a["asset_class"].lower() == "insurance")
+    total_annuity = sum(a["current_value"] for a in assets if a["asset_class"].lower() == "annuity")
+    total_cash = sum(a["current_value"] for a in assets if a["asset_class"].lower() == "cash")
+    total_net_worth = total_stocks + total_mutual_funds + total_insurance + total_annuity + total_cash
+    return {
+        "assets": assets,
+        "summary": {
+            "total_stocks": total_stocks,
+            "total_mutual_funds": total_mutual_funds,
+            "total_insurance": total_insurance,
+            "total_annuity": total_annuity,
+            "total_cash": total_cash,
+            "total_net_worth": total_net_worth,
+        },
+    }
+
+
+def get_monthly_report(month: str, person: str | None) -> list[dict]:
+    expenses = load_expenses()
+    budgets_list = load_budgets()
+
+    budgets: dict[str, float] = {}
+    for b in budgets_list:
+        if person and person.lower() != "family":
+            if b["person"].lower() in (person.lower(), "family"):
+                budgets[b["category"]] = b["monthly_limit"]
+        else:
+            budgets[b["category"]] = b["monthly_limit"]
+
+    if person and person.lower() != "family":
+        expenses = [e for e in expenses if e["person"].lower() == person.lower()]
+    expenses = [e for e in expenses if e["date"].startswith(month) and e["type"] == "expense"]
+
+    totals: dict[str, float] = {}
+    for e in expenses:
+        totals[e["category"]] = totals.get(e["category"], 0.0) + e["amount"]
+
+    rows = []
+    for cat in sorted(set(totals) | set(budgets)):
+        spent = totals.get(cat, 0.0)
+        budget = budgets.get(cat)
+        if budget is not None:
+            remaining = budget - spent
+            status = "OVER" if spent > budget else ("WARNING" if spent / budget >= 0.9 else "OK")
+        else:
+            remaining = None
+            status = "OK"
+        rows.append({"category": cat, "spent": spent, "budget": budget, "remaining": remaining, "status": status})
+    return rows
+
+
+def get_monthly_history(person: str | None) -> list[dict]:
+    expenses = load_expenses()
+    if person and person.lower() != "family":
+        expenses = [e for e in expenses if e["person"].lower() == person.lower()]
+
+    months: dict[str, dict] = defaultdict(lambda: {"spending_ex_investment": 0.0, "invested": 0.0})
+    for e in expenses:
+        month = e["date"][:7]
+        if not month:
+            continue
+        if e["type"] == "investment":
+            months[month]["invested"] += e["amount"]
+        else:
+            months[month]["spending_ex_investment"] += e["amount"]
+
+    result = []
+    for month in sorted(months.keys()):
+        spending = months[month]["spending_ex_investment"]
+        invested = months[month]["invested"]
+        result.append({"month": month, "spending_ex_investment": spending, "invested": invested, "total_outflow": spending + invested})
+    return result
+
+
+def add_expense(body: dict) -> dict:
+    entry = {
+        "date": body.get("date") or str(date.today()),
+        "category": body["category"].strip().lower(),
+        "amount": body["amount"],
+        "merchant": body.get("merchant") or "",
+        "person": body.get("person") or "",
+        "source": body.get("source") or "manual",
+        "type": body.get("type") or "expense",
+        "notes": body.get("notes") or "",
+    }
+    ws = _get_sheet().worksheet("Expenses")
+    ws.append_row([
+        entry["date"], entry["category"], entry["amount"],
+        entry["merchant"], entry["person"], entry["source"],
+        entry["type"], entry["notes"],
+    ])
+    load_expenses.clear()
+    return entry
+
+
+def update_portfolio(asset_class: str, institution: str, current_value: float) -> bool:
+    ws = _get_sheet().worksheet("Portfolio")
+    records = ws.get_all_records()
+    for i, r in enumerate(records, start=2):
+        if (str(r.get("AssetClass", "")).strip().lower() == asset_class.strip().lower()
+                and str(r.get("Institution", "")).strip().lower() == institution.strip().lower()):
+            ws.update([[current_value]], f"D{i}")
+            ws.update([[str(date.today())]], f"E{i}")
+            load_portfolio.clear()
+            return True
+    return False
 
 
 # ── Utilities ─────────────────────────────────────────────────────────────────
@@ -154,28 +300,29 @@ if sb_submitted:
             "source": "manual",
             "notes": sb_notes.strip() or None,
         }
-        entry = api_post("/expenses", body)
+        entry = add_expense(body)
         st.sidebar.success(f"Added ₹{entry['amount']:,.0f} to '{entry['category']}'")
         st.rerun()
-    except ValueError as e:
+    except Exception as e:
         st.sidebar.error(str(e))
 
 # ── Fetch data ────────────────────────────────────────────────────────────────
 
 p = person_param(person)
 
-# Expenses for the selected period
-if month_filter:
-    all_expenses = api_get("/expenses", month=month_filter, person=p) or []
-    month_expenses = api_get("/expenses", month=month_filter, person=p, type="expense") or []
-    month_investments = api_get("/expenses", month=month_filter, person=p, type="investment") or []
-else:
-    all_expenses_raw = api_get("/expenses", person=p) or []
-    all_expenses = [e for e in all_expenses_raw if e["date"].startswith(year_filter)]
-    month_expenses = [e for e in all_expenses if e["type"] == "expense"]
-    month_investments = [e for e in all_expenses if e["type"] == "investment"]
+all_expenses_raw = load_expenses()
+if p:
+    all_expenses_raw = [e for e in all_expenses_raw if e["person"].lower() == p.lower()]
 
-portfolio_data = api_get("/portfolio") or {"assets": [], "summary": {}}
+if month_filter:
+    all_expenses = [e for e in all_expenses_raw if e["date"].startswith(month_filter)]
+else:
+    all_expenses = [e for e in all_expenses_raw if e["date"].startswith(year_filter)]
+
+month_expenses = [e for e in all_expenses if e["type"] == "expense"]
+month_investments = [e for e in all_expenses if e["type"] == "investment"]
+
+portfolio_data = get_portfolio_data()
 portfolio_summary = portfolio_data.get("summary", {})
 
 # ── 4 Metric cards ────────────────────────────────────────────────────────────
@@ -211,7 +358,7 @@ if view == "This month":
 
     report_rows = []
     if month_filter:
-        report_rows = api_get("/monthly-report", month=month_filter, person=p) or []
+        report_rows = get_monthly_report(month_filter, p)
 
     left_col, right_col = st.columns(2)
 
@@ -384,7 +531,7 @@ elif view == "History":
 
     st.subheader("Monthly History")
 
-    history = api_get("/monthly-history", person=p) or []
+    history = get_monthly_history(p)
 
     if history:
         today_month = date.today().strftime("%Y-%m")
@@ -392,7 +539,6 @@ elif view == "History":
         df_hist = pd.DataFrame(history)
         df_hist = df_hist.sort_values("month", ascending=False)
 
-        # Compute previous year average
         prev_year = str(date.today().year - 1)
         prev_year_rows = df_hist[df_hist["month"].str.startswith(prev_year)]
         if not prev_year_rows.empty:
@@ -431,7 +577,6 @@ elif view == "History":
             hide_index=True,
         )
 
-        # History chart (raw data, no avg row)
         df_chart = pd.DataFrame(history).sort_values("month")
         if not df_chart.empty:
             chart_data = df_chart[["month", "spending_ex_investment", "invested"]].melt(
@@ -516,13 +661,9 @@ elif view == "Portfolio":
         if submitted:
             idx = asset_options.index(selected)
             chosen = assets[idx]
-            try:
-                api_patch("/portfolio", {
-                    "asset_class": chosen["asset_class"],
-                    "institution": chosen["institution"],
-                    "current_value": new_value,
-                })
+            ok = update_portfolio(chosen["asset_class"], chosen["institution"], new_value)
+            if ok:
                 st.success(f"Updated {chosen['institution']} ({chosen['asset_class']}) to {fmt_inr(new_value)}")
                 st.rerun()
-            except ValueError as e:
-                st.error(str(e))
+            else:
+                st.error(f"Could not find '{chosen['institution']}' in Portfolio sheet.")
