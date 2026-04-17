@@ -1,0 +1,27 @@
+Update the Portfolio tab in Google Sheet (ID: 1pUOXBYP5O8vb8Tq8SBI_JJxLbP40O8ahPKx_MKBTBOM) with complete real portfolio values.
+
+Clear the existing Portfolio tab completely and replace with these exact rows (keep headers: AssetClass, SubCategory, Institution, CurrentValue, LastUpdated, Notes):
+
+Stocks | Equity | Zerodha (Shalini) | 537766 | 2026-04-17 | KRN + BDL holdings only
+Stocks | Equity | Zerodha (Papa) | 1000000 | 2026-04-17 | As provided
+Stocks | Equity | AngelOne | 617172 | 2026-04-17 | Equity 485172 + Cash 132000
+Stocks | Equity | Hem Securities (Shalini) | 1225547 | 2026-04-17 | From holding statement 31-Mar-2026
+Mutual Funds | ELSS+MF | COIN Zerodha (Shalini) | 609447 | 2026-04-17 | Axis ELSS + Mirae + Quant ELSS + Zerodha ELSS
+Mutual Funds | MF | AngelOne MF | 235588 | 2026-04-17 | SBI Contra + HDFC Flexi + ICICI Corp Bond + Tata MM + Parag Parikh + Motilal Oswal x2
+Insurance | Life ULIP | TATA AIA Smart SIP (Saket) | 133992 | 2026-04-17 | Fund value as of 15-Apr-2026
+Insurance | Life ULIP | HDFC Life Click 2 Wealth (Saket) | 137078 | 2026-04-17 | Fund value 117078 + advance premium 20000
+Insurance | Life ULIP | ICICI Pru Signature Assure (Shalini) | 131625 | 2026-04-17 | Total fund value
+Annuity | Pension | Bajaj Life (Saket) | 1277352 | 2026-04-17 | Fund portfolio value - 3 active policies
+Cash | Savings | ICICI Bank | 0 | 2026-04-17 | Update monthly
+Cash | Savings | HDFC Bank | 0 | 2026-04-17 | Update monthly
+Cash | Savings | Axis Bank | 0 | 2026-04-17 | Update monthly
+
+Then print a full summary:
+- Total Stocks
+- Total Mutual Funds  
+- Total Insurance
+- Total Annuity
+- Total Cash
+- Grand Total Net Worth
+
+Also push to GitHub after updating.
