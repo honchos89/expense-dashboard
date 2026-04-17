@@ -1,0 +1,31 @@
+Do the following in order:
+
+1. Fix existing Zerodha investment entries in Google Sheet Expenses tab:
+Connect to spreadsheet ID 1pUOXBYP5O8vb8Tq8SBI_JJxLbP40O8ahPKx_MKBTBOM.
+Find all rows in Expenses tab where Merchant contains "Zerodha" or "ZERODHA" or "ICCL ZERODHA".
+For each such row:
+- Change Category to "Mutual Funds"
+- Change Type to "investment"
+Print "Fixed: [merchant] [amount] → investment"
+
+2. Update the /parse-email endpoint in api.py to auto-detect investment transactions:
+If the VPA address in a UPI email contains any of these keywords:
+zerodha, iccl, rzpiccl, validicici, validhdfc, groww, kuvera, coin
+Then set:
+- category = "Mutual Funds" (or "Stocks" if it looks like equity)
+- type = "investment"
+
+For Zerodha specifically:
+- zerodha.rzpiccl or zerodha.iccl = Mutual Funds (COIN SIP)
+- Other zerodha VPAs = Stocks
+
+3. Add investment portfolio auto-update logic to api.py:
+When a new investment is saved to Expenses tab with type="investment":
+- Check the category (Mutual Funds, Stocks etc.)
+- Find the matching row in Portfolio tab where Institution contains the broker name
+- Add the investment amount to the CurrentValue of that row
+- Update LastUpdated to today's date
+BUT only do this for transactions dated from next month (2026-05-01) onwards.
+For current month (April 2026) skip the portfolio update since it's already manually set.
+
+4. Push to GitHub after all changes.

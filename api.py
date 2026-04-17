@@ -70,6 +70,42 @@ def append_expense_row(entry: dict) -> None:
         entry.get("type", "expense"),
         entry.get("notes", ""),
     ])
+    # Auto-update Portfolio for investment transactions dated 2026-05-01 onwards
+    if entry.get("type") == "investment" and entry.get("date", "") >= "2026-05-01":
+        _update_portfolio_for_investment(entry)
+
+
+def _update_portfolio_for_investment(entry: dict) -> None:
+    """Add investment amount to the matching Portfolio row based on merchant/category."""
+    category = entry.get("category", "").lower()
+    merchant = entry.get("merchant", "").lower()
+    amount = float(entry.get("amount", 0))
+
+    # Map category to asset class
+    asset_class_map = {
+        "mutual funds": "Mutual Funds",
+        "stocks": "Stocks",
+    }
+    target_asset_class = asset_class_map.get(category)
+    if not target_asset_class:
+        return
+
+    ws = sh.worksheet("Portfolio")
+    records = ws.get_all_records()
+
+    # Find the best-matching row: institution name appears in merchant or vice versa
+    for i, r in enumerate(records, start=2):
+        if str(r.get("AssetClass", "")).strip().lower() != target_asset_class.lower():
+            continue
+        institution = str(r.get("Institution", "")).lower()
+        # Check if any word from the institution name appears in the merchant string
+        institution_words = [w for w in institution.split() if len(w) > 3]
+        if any(w in merchant for w in institution_words) or any(w in institution for w in merchant.split() if len(w) > 3):
+            current = float(r.get("CurrentValue", 0) or 0)
+            new_value = current + amount
+            ws.update([[new_value]], f"D{i}")
+            ws.update([[str(date.today())]], f"E{i}")
+            return
 
 
 def load_budgets_list() -> list[dict]:
@@ -378,6 +414,34 @@ def _categorize(merchant: str) -> str:
         if any(kw in m_lower for kw in keywords):
             return category
     return "general"
+
+
+# VPA substrings that indicate an investment broker
+_INVESTMENT_VPAS: dict[str, tuple[str, str]] = {
+    # (category, type)
+    "zerodha.rzpiccl": ("Mutual Funds", "investment"),
+    "zerodha.iccl":    ("Mutual Funds", "investment"),
+    "rzpiccl":         ("Mutual Funds", "investment"),  # COIN SIP generic
+    "iccl":            ("Mutual Funds", "investment"),  # ICCL settlement
+    "validicici":      ("Mutual Funds", "investment"),
+    "validhdfc":       ("Mutual Funds", "investment"),
+    "groww":           ("Mutual Funds", "investment"),
+    "kuvera":          ("Mutual Funds", "investment"),
+    "coin":            ("Mutual Funds", "investment"),
+    "zerodha":         ("Stocks",       "investment"),  # catch-all for other Zerodha VPAs
+}
+
+
+def _detect_investment_vpa(text: str) -> tuple[str, str] | None:
+    """Return (category, type) if the UPI VPA in the email matches a known broker, else None."""
+    m = re.search(r"to\s+VPA\s+(\S+)", text, re.IGNORECASE)
+    if not m:
+        return None
+    vpa = m.group(1).lower().rstrip(".,")
+    for keyword, result in _INVESTMENT_VPAS.items():
+        if keyword in vpa:
+            return result
+    return None
 
 
 # Refund/reversal signal words
@@ -718,8 +782,13 @@ def parse_email(payload: ParseEmailIn):
             merchant = _extract_merchant_icici(body)
         else:
             merchant = _extract_merchant_hdfc(body) or _extract_merchant_icici(body) or "Unknown"
-        category = _categorize(merchant)
-        txn_type = "expense"
+
+        investment = _detect_investment_vpa(body)
+        if investment:
+            category, txn_type = investment
+        else:
+            category = _categorize(merchant)
+            txn_type = "expense"
         notes = bank
 
     entry = {
