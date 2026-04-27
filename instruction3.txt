@@ -1,0 +1,34 @@
+Do the following:
+
+1. Add a new tab called "Portfolio" to the Google Sheet (spreadsheet ID: 1pUOXBYP5O8vb8Tq8SBI_JJxLbP40O8ahPKx_MKBTBOM) with these headers and sample structure:
+
+Headers: AssetClass | SubCategory | Institution | CurrentValue | LastUpdated | Notes
+
+Add these sample rows:
+Stocks | Equity | Zerodha | 0 | 2026-04-16 | Update monthly from Console
+Stocks | Equity | AngelOne | 0 | 2026-04-16 | Update monthly
+Stocks | Equity | Hem Securities | 0 | 2026-04-16 | Update monthly
+Mutual Funds | SIP | COIN Zerodha | 0 | 2026-04-16 | Update from CAS statement
+Mutual Funds | SIP | AngelOne MF | 0 | 2026-04-16 | Update monthly
+Insurance | Life | TATA AIA | 0 | 2026-04-16 | Update quarterly - fund value
+Insurance | Life | HDFC Life | 0 | 2026-04-16 | Update quarterly - fund value
+Insurance | Life | ICICI Prudential | 0 | 2026-04-16 | Update quarterly - fund value
+Annuity | Pension | Bajaj Life Insurance | 0 | 2026-04-16 | Update quarterly
+Cash | Savings | ICICI Bank | 0 | 2026-04-16 | Update monthly
+Cash | Savings | HDFC Bank | 0 | 2026-04-16 | Update monthly
+Cash | Savings | Axis Bank | 0 | 2026-04-16 | Update monthly
+
+2. Add a new API endpoint GET /portfolio to api.py that:
+- Reads the Portfolio tab from Google Sheet
+- Returns list of all assets with their values
+- Also returns summary: total_stocks, total_mutual_funds, total_insurance, total_annuity, total_cash, total_net_worth (sum of all CurrentValue)
+
+3. Update the GET /networth endpoint to calculate net worth from the Portfolio tab instead of the NetWorth tab
+
+4. Add a Portfolio tab to app.py Streamlit dashboard with:
+- A summary section at top showing: Total Stocks, Total Mutual Funds, Total Insurance, Total Annuity, Total Cash, Total Net Worth — all in ₹
+- A table showing all assets grouped by AssetClass with Institution, CurrentValue, LastUpdated columns
+- An "Edit Values" section at the bottom — a form where you can select any asset from a dropdown, enter a new value, and click Update to save it directly to Google Sheet
+- The Net Worth metric card on the main dashboard should now pull from /portfolio total_net_worth
+
+5. Push everything to GitHub

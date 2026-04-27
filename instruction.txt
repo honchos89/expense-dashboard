@@ -1,0 +1,22 @@
+Fix two bugs in the /parse-email endpoint in api.py:
+
+Bug 1 — Date extraction not working:
+Extract the actual transaction date from the email body. Handle these formats:
+- "on 12-04-26" → 2026-04-12
+- "on 09 Apr, 2026" → 2026-04-09
+- "on 15 Apr, 2026 at 18:30" → 2026-04-15
+- "on 02-04-26" → 2026-04-02
+If no date found, fall back to today's date.
+
+Bug 2 — Reversal emails not captured:
+Currently only "debited" emails are processed. Add handling for reversal emails:
+- If email body contains "transaction reversal" or "reversal of Rs" → transaction_type = "refund"
+- Extract amount from "reversal of Rs.3357.00"
+- Extract merchant from "From Merchant:A SB EMT FLIGHT" or similar
+- Category = "Refund"
+- Type = "refund"
+- Save to Google Sheet as a positive refund entry
+
+Also fix Make.com filter — the "Has the words" field in Gmail module needs to match both debits AND reversals. But since we can't change Make.com from here, add a note in CLAUDE.md that the Gmail module filter should be changed from "debited" to just leave it empty — the Router branches will handle filtering.
+
+Then push to GitHub.

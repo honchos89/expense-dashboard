@@ -1,0 +1,39 @@
+Create a file called fix_and_reversals.py that does two things:
+
+1. Fix dates for all existing records in Google Sheet:
+Connect to the Expenses tab using google-credentials.json and spreadsheet ID 1pUOXBYP5O8vb8Tq8SBI_JJxLbP40O8ahPKx_MKBTBOM.
+Find all rows where Date = "2026-04-15" (today, which are wrong dates).
+For each wrong row, look at the Notes column — if it says "HDFC" check the Merchant name against this mapping to set correct date:
+- MANAK MEWA SAHAKARA → 2026-04-12
+- ANSHUL ARORA → 2026-04-11
+- ICCL ZERODHA → 2026-04-02
+- Zerodha Broking Limited (rows 5,6) → 2026-04-02
+- Zerodha Broking Limited (row 7) → 2026-04-01
+- MURALI KRISHNA G → 2026-04-01
+- TARKESHWAR TIWARI (rows 9,10) → 2026-04-01
+- MYNTRA VIA SMARTBUY → 2026-04-14
+- WWW SWIGGY IN → 2026-04-12
+- FIRSTCRY (first one) → 2026-04-12
+- PYU Swiggy Food (364) → 2026-04-12
+- FIRSTCRY (4203.50) → 2026-04-11
+- RSP INSTAMART (393) → 2026-04-10
+- RSP INSTAMART (553) → 2026-04-09
+- GYFTR VIA SMARTBUY → 2026-04-09
+- CONFIRMTKT SMART BUY → 2026-04-06
+- SB EMT FLIGHT (3357) → 2026-04-06
+- SB EMT FLIGHT (3803) → 2026-04-06
+- Swiggy (461) → 2026-04-05
+- BALMAPP → 2026-04-05
+- PYU Swiggy Food (336) → 2026-04-05
+- RSP INSTAMART (415) → 2026-04-04
+- PYU Swiggy Food (595) → 2026-04-04
+- Swiggy (630) → 2026-04-04
+- WWW ACKO COM → 2026-04-03
+Update each row's Date column with the correct date.
+Print "Fixed: [merchant] → [correct date]" for each update.
+
+2. Log the 2 reversal emails by calling POST https://expense-api-5azs.onrender.com/parse-email:
+Reversal 1: {"email_body": "Dear Customer, Greetings from HDFC Bank! Transaction reversal of Rs.3357.00 has been initiated to your HDFC Bank Credit Card ending 0175. From Merchant:A SB EMT FLIGHT Date Time: 15 Apr, 2026 at 18:30:", "email_from": "alerts@hdfcbank.bank.in", "person": "Saket"}
+Reversal 2: {"email_body": "Dear Customer, Greetings from HDFC Bank! Transaction reversal of Rs.3803.00 has been initiated to your HDFC Bank Credit Card ending 0175. From Merchant:A SB EMT FLIGHT Date Time: 15 Apr, 2026 at 18:30:", "email_from": "alerts@hdfcbank.bank.in", "person": "Saket"}
+Print result for each.
+Any log that is already done and existing, do not overwrite it. 

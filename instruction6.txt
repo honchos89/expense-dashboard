@@ -1,0 +1,88 @@
+Rebuild app.py as a clean personal finance portfolio dashboard based on this exact design:
+
+ARCHITECTURE:
+- Read ALL data directly from Google Sheets using gspread (not from Render API)
+- Use google-credentials.json locally, fall back to st.secrets["GOOGLE_CREDENTIALS_JSON"] on Streamlit Cloud
+- Spreadsheet ID: 1pUOXBYP5O8vb8Tq8SBI_JJxLbP40O8ahPKx_MKBTBOM
+- Tabs to read: Expenses, Budgets, Portfolio
+
+AUTHENTICATION:
+- Password gate using st.secrets["APP_PASSWORD"] - show centered login form before any content
+
+PAGE STRUCTURE:
+Single page with these sections in order:
+
+1. TOP BAR
+- Title: "Personal Finance Dashboard"
+- Person toggle: Family / Saket / Wife (radio buttons)
+- View toggle: Portfolio / Expenses / History (radio buttons)
+- Date filter buttons: 1W / 1M / MTD / 3M / YTD / 1Y / All
+
+2. PORTFOLIO VIEW (when View = Portfolio):
+
+a) 4 metric cards in a row:
+- Net Worth (sum of all CurrentValue in Portfolio tab)
+- Equity (sum where AssetClass = Stocks)
+- Mutual Funds (sum where AssetClass = Mutual Funds)
+- Insurance + Annuity (sum where AssetClass = Insurance or Annuity)
+
+b) Two column layout:
+Left (wider): Allocation breakdown
+- Each asset class as a row with: colored dot, label, progress bar, value, percentage
+- Clickable rows that filter the holdings table
+- Total row at bottom
+
+Right: Donut chart (plotly) showing allocation by asset class with legend below
+
+c) Holdings table with:
+- Filter tabs: All / Equity / Mutual Funds / Insurance / Annuity / Cash
+- Search box
+- Columns: Institution, Category (colored badge), Value, Weight %, Last Updated
+- Sortable columns
+- Color coding by category:
+  Stocks = blue badge
+  Mutual Funds = green badge
+  Insurance = amber badge
+  Annuity = purple badge
+  Cash = gray badge
+
+3. EXPENSES VIEW (when View = Expenses):
+
+a) 4 metric cards:
+- Net Spending (ex-investment, ex-refunds)
+- Total Invested this month
+- Total Refunds this month
+- Total Outflow (spending + invested)
+
+b) Two column layout:
+Left: Spending vs Budget table by category with OK/WARNING/OVER status
+Right: Investments this month breakdown
+
+c) Daily spend bar chart (plotly)
+
+d) Recent transactions table:
+- Date, Merchant, Category, Amount, Person, Source (auto/manual), Type
+- Color: red for expenses, purple for investments, green for refunds
+- Person filter from top bar applies here
+
+4. HISTORY VIEW (when View = History):
+- Month dropdown selector
+- Table showing each month: Month, Spending ex-investment, Invested, Refunds, Net outflow
+- Current month highlighted
+
+SIDEBAR:
+- "Add Entry" form with fields:
+  Date, Category, Amount (₹), Merchant, Person (Saket/Wife), Type (expense/investment/refund), Source (manual/auto), Notes
+- Submit button that writes directly to Google Sheets Expenses tab
+- "Update Portfolio" form:
+  Institution dropdown (from Portfolio tab), New Value, Date
+  Submit writes to Portfolio tab
+
+STYLING:
+- Dark theme compatible
+- All amounts in ₹ Indian format (use Indian numbering: L for lakhs, k for thousands)
+- Clean minimal design
+- Use plotly for all charts (not matplotlib)
+- Use st.cache_data with ttl=300 for Google Sheets reads (refresh every 5 mins)
+
+Push to GitHub after building.

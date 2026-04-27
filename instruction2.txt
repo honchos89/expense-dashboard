@@ -1,0 +1,28 @@
+Create and run a script called fix_refunds_and_backfill.py that does three things:
+
+1. Fix refunds to show negative amounts in Google Sheet:
+Connect to Expenses tab in spreadsheet 1pUOXBYP5O8vb8Tq8SBI_JJxLbP40O8ahPKx_MKBTBOM.
+Find all rows where Type = "refund" and Amount is positive.
+For each, multiply Amount by -1 to make it negative.
+Print "Fixed refund: [merchant] → -[amount]"
+
+2. Log these 8 missing reversal emails by calling POST https://expense-api-5azs.onrender.com/parse-email:
+{"email_body": "Dear Customer, Greetings from HDFC Bank! Transaction reversal of Rs.815.36 has been initiated to your HDFC Bank Credit Card ending 0175. From Merchant:A CONFIRMTKT SMART BUY Date Time: 14 Apr, 2026 at", "email_from": "alerts@hdfcbank.bank.in", "person": "Saket"}
+{"email_body": "Dear Customer, Greetings from HDFC Bank! Transaction reversal of Rs.697.00 has been initiated to your HDFC Bank Credit Card ending 0175. From Merchant:A MYNTRA VIA SMARTBUY Date Time: 14 Apr, 2026 at", "email_from": "alerts@hdfcbank.bank.in", "person": "Saket"}
+{"email_body": "Dear Customer, Greetings from HDFC Bank! Transaction reversal of Rs.271.00 has been initiated to your HDFC Bank Credit Card ending 0175. From Merchant:A MYNTRA VIA SMARTBUY Date Time: 09 Apr, 2026 at", "email_from": "alerts@hdfcbank.bank.in", "person": "Saket"}
+{"email_body": "Dear Customer, Greetings from HDFC Bank! Transaction reversal of Rs.872.00 has been initiated to your HDFC Bank Credit Card ending 0175. From Merchant:A MYNTRA VIA SMARTBUY Date Time: 06 Apr, 2026 at", "email_from": "alerts@hdfcbank.bank.in", "person": "Saket"}
+{"email_body": "Dear Customer, Greetings from HDFC Bank! Transaction reversal of Rs.1397.00 has been initiated to your HDFC Bank Credit Card ending 0175. From Merchant:A MYNTRA VIA SMARTBUY Date Time: 06 Apr, 2026 at", "email_from": "alerts@hdfcbank.bank.in", "person": "Saket"}
+{"email_body": "Dear Customer, Greetings from HDFC Bank! Transaction reversal of Rs.255.00 has been initiated to your HDFC Bank Credit Card ending 0175. From Merchant:A MYNTRA VIA SMARTBUY Date Time: 06 Apr, 2026 at", "email_from": "alerts@hdfcbank.bank.in", "person": "Saket"}
+{"email_body": "Dear Customer, Greetings from HDFC Bank! Transaction reversal of Rs.255.00 has been initiated to your HDFC Bank Credit Card ending 0175. From Merchant:A MYNTRA VIA SMARTBUY Date Time: 06 Apr, 2026 at", "email_from": "alerts@hdfcbank.bank.in", "person": "Saket"}
+{"email_body": "Dear Customer, Greetings from HDFC Bank! Transaction reversal of Rs.494.00 has been initiated to your HDFC Bank Credit Card ending 0175. From Merchant:A MYNTRA VIA SMARTBUY Date Time: 06 Apr, 2026 at", "email_from": "alerts@hdfcbank.bank.in", "person": "Saket"}
+
+3. Fix dashboard total calculations in app.py:
+In the spending vs budget section and metric cards:
+- "Spending ex-investment" = sum of all expenses where type=expense (positive amounts only)
+- "Total refunds" = sum of all refunds (negative amounts, shown as positive savings)
+- "Net spending" = Spending ex-investment minus total refunds
+- "Total outflow" = Net spending + investments
+Update the metric cards to show: Net Worth, Net Spending (after refunds), Invested this month, Total Outflow
+Add a small "Refunds: ₹X" line below the Net Spending card showing total refunds received
+
+Then push everything to GitHub.
